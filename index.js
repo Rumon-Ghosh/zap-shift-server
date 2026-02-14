@@ -67,10 +67,10 @@ async function run() {
     // users APIs
     app.post("/users", verifyFBToken, async (req, res) => {
       const user = req.body;
-      const filter = {email: user?.email};
+      const filter = { email: user?.email };
       const existingUser = await userCollection.findOne(filter);
       if (existingUser) {
-        return req.send({message: "User already exist"})
+        return res.send({ message: "User already exist" })
       }
       const newUser = {
         ...user,
@@ -96,12 +96,11 @@ async function run() {
     });
 
     app.get("/parcels", verifyFBToken, async (req, res) => {
-      const  email  = req.decoded_email;
-      // console.log("Verified email:", email);
-      const query = {};
-      if (email) {
-        query.senderEmail = email;
+      const email = req.decoded_email;
+      if (!email) {
+        return res.send([]);
       }
+      const query = { senderEmail: email };
       const result = await parcelCollection
         .find(query)
         .sort({ createdAt: -1 })
@@ -246,7 +245,7 @@ async function run() {
         });
 
         if (!invoiceExists) {
-         const invoiceResult = await invoiceCollection.insertOne(invoiceData);
+          const invoiceResult = await invoiceCollection.insertOne(invoiceData);
           if (!invoiceResult.acknowledged) {
             console.error("Failed to create invoice:", invoiceData);
             return res.status(500).send({ message: "Failed to create invoice" });
@@ -267,11 +266,10 @@ async function run() {
     // invoice API
     app.get("/invoices", verifyFBToken, async (req, res) => {
       const email = req.decoded_email;
-      // console.log(req.decoded_email)
-      const query = {};
-      if (email) {
-        query.paidBy = email;
+      if (!email) {
+        return res.send([]);
       }
+      const query = { paidBy: email };
       const result = await invoiceCollection
         .find(query)
         .sort({ paidAt: -1 })
