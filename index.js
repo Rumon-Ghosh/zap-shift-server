@@ -17,7 +17,7 @@ function generateTrackingId() {
 }
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 // middleware
@@ -46,7 +46,7 @@ const verifyFBToken = async (req, res, next) => {
   } catch (error) {
     res.status(401).send({ message: "Invalid or expired token" });
   }
-}
+};
 
 const uri = process.env.MONGODB_URI;
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -63,6 +63,7 @@ async function run() {
     const userCollection = zapShiftDB.collection("users");
     const parcelCollection = zapShiftDB.collection("parcels");
     const invoiceCollection = zapShiftDB.collection("invoices");
+    const riderCollection = zapShiftDB.collection("riders");
 
     // users APIs
     app.post("/users", verifyFBToken, async (req, res) => {
@@ -70,16 +71,16 @@ async function run() {
       const filter = { email: user?.email };
       const existingUser = await userCollection.findOne(filter);
       if (existingUser) {
-        return res.send({ message: "User already exist" })
+        return res.send({ message: "User already exist" });
       }
       const newUser = {
         ...user,
         role: "user",
         createdAt: new Date(),
-      }
+      };
       const result = await userCollection.insertOne(newUser);
-      res.send(result)
-    })
+      res.send(result);
+    });
 
     // parcels API
     app.post("/parcels", async (req, res) => {
@@ -127,6 +128,93 @@ async function run() {
       const result = await parcelCollection.deleteOne(filter);
       res.send(result);
     });
+
+    // rider related API
+    app.post("/rider", verifyFBToken, async (req, res) => {
+      const rider = req.body;
+      const filter = { email: rider?.email };
+      const existingRider = await riderCollection.findOne(filter);
+      if (existingRider) {
+        return res
+          .status(400)
+          .send({ message: "We got your rider request already" });
+      }
+      const riderData = {
+        ...rider,
+        status: "pending",
+        createdAt: new Date(),
+      };
+      const result = await riderCollection.insertOne(riderData);
+      res.send(result);
+    });
+
+    app.get("/riders", verifyFBToken, async (req, res) => {
+      if (req.query.status) {
+        query.status = req.query.status;
+      }
+      const result = await riderCollection.find().sort({ createdAt: -1}).toArray();
+      res.send(result);
+    });
+
+    app.patch("/riders/:id", verifyFBToken, async (req, res) => {
+      const { id } = req.params;
+      if (!id) {
+        return res
+          .status(400)
+          .send({ message: "Cannot update rider. Rider id not found." });
+      }
+      const { status } = req.query || "pending";
+      const filter = { _id: new ObjectId(id) };
+      const updatatedStatus = {
+        $set: {
+          status: status,
+        },
+      };
+      const result = await riderCollection.updateOne(filter, updatatedStatus);
+      
+      const riderDoc = await riderCollection.findOne(filter);
+      if (status === "approved") {
+        if (riderDoc?.email) {
+          const updateRole = {
+            $set: {
+              role: "rider",
+            },
+          };
+          const updateUser = await userCollection.updateOne(
+            { email: riderDoc?.email },
+            updateRole,
+          );
+          return res.send(updateUser);
+        }
+      }
+      if (status === "rejected") {
+        if (riderDoc?.email) {
+          const updateRole = {
+            $set: {
+              role: "user",
+            },
+          };
+          const updateUser = await userCollection.updateOne(
+            { email: riderDoc?.email },
+            updateRole,
+          );
+          return res.send(updateUser);
+        }
+      }
+      res.send(result);
+    });
+
+    app.delete("/riders/:id", verifyFBToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const filter = { _id: new ObjectId(id) };
+        const result = await riderCollection.deleteOne(filter);
+        res.send(result);
+      } catch (error) {
+        console.error("Error deleting rider:", error);
+        res.status(500).send({ message: "Failed to delete rider" });
+      }
+    })
 
     // payment related APIs
     app.post("/create-checkout-session", async (req, res) => {
@@ -248,7 +336,9 @@ async function run() {
           const invoiceResult = await invoiceCollection.insertOne(invoiceData);
           if (!invoiceResult.acknowledged) {
             console.error("Failed to create invoice:", invoiceData);
-            return res.status(500).send({ message: "Failed to create invoice" });
+            return res
+              .status(500)
+              .send({ message: "Failed to create invoice" });
           }
         }
 
