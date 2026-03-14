@@ -57,6 +57,7 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
 async function run() {
   try {
     const zapShiftDB = client.db("zapShift");
@@ -64,6 +65,18 @@ async function run() {
     const parcelCollection = zapShiftDB.collection("parcels");
     const invoiceCollection = zapShiftDB.collection("invoices");
     const riderCollection = zapShiftDB.collection("riders");
+
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      if (!email) {
+        return res.status(401).send({ message: "Access token missing" });
+      }
+      const user = await userCollection.findOne({ email });
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "Access denied. Admin privileges required." });
+      }
+      next();
+    };
 
     // users APIs
     app.post("/users", verifyFBToken, async (req, res) => {
@@ -81,6 +94,49 @@ async function run() {
       const result = await userCollection.insertOne(newUser);
       res.send(result);
     });
+
+    app.get("/users", verifyFBToken, async (req, res) => {
+      const filter = { role: { $ne: "rider" } };
+      const cursor = userCollection.find(filter);
+      const result = await cursor.toArray();
+      res.send(result);
+    })
+
+    app.get("/users/:email/role", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const { email } = req.params;
+        const filter = {};
+        if (email) {
+          filter.email = email
+        }
+        const result = await userCollection.findOne(filter);
+        res.send(result.role);
+      } catch (error) {
+        console.error("Error on getting user role:", error);
+        res.status(500).send({ message: "Error on get User" });
+      }
+    })
+
+    app.patch("/users/:id", verifyFBToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        if (!id) {
+          return res.status(400).send({ message: "Cannot update user. User id not found." });
+        }
+        const { role } = req.query || "user";
+        const filter = { _id: new ObjectId(id) };
+        const updatatedRole = {
+          $set: {
+            role: role,
+          },
+        };
+        const result = await userCollection.updateOne(filter, updatatedRole);
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating user:", error);
+        res.status(500).send({ message: "Error updating user" });
+      }
+    })
 
     // parcels API
     app.post("/parcels", async (req, res) => {
